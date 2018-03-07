@@ -1,0 +1,1 @@
+# Relationship-between-IQ-and-symptom-severity-in-ASD
