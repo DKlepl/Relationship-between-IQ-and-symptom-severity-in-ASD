@@ -8,6 +8,10 @@ output: html_document
 ```{r libraries}
 library(readr)
 library(dplyr)
+library(rethinking)
+library(ggplot2)
+library(plot3D)
+library(ggthemes)
 ```
 
 ```{r load data}
@@ -22,7 +26,12 @@ The data you will use is the outcome of the psychological testing of the childre
 Data: https://www.dropbox.com/s/hom2qnmp9hyfwmu/Assignment3Data.csv?dl=0
 The data consists of ChildID, gender, age, diagnosis (ASD), symptom severity (ADOS), several aspects of IQ (NonVerbal/Perceptual,Verbal,Social) and the visit at which the tests were administered. The questions should be answered by focusing on visit 1.
 
-## Subset the data
+The questions you will have to answer are:
+
+# 1.
+Assess the relation between symptom severity and IQ (focus on visit 1 and children with ASD) and report the model, a plot of the model, a couple of lines describing the quality of the model and interpreting the results. P.S. Should you scale? P.P.S. Don't forget to motivate your priors. P.P.P.S. At least one plot for results and a plot for quality of each model (here and in the next questions) would be appreciated.
+
+Subset the data
 To answer the questions I'll be using data collected only on the first visit. 
 ```{r clean data}
 visit_1 = subset(d,Visit==1 & ASD==1)
@@ -32,15 +41,158 @@ anyNA(visit_1)
 
 #correct classes?
 str(visit_1)
+
+visit_1 = as.data.frame(visit_1)
+```
+
+1.1. Verbal IQ and ADOS
+
+First we need a motivated prior for the model. So let's start with that.
+```{r}
+#intercept = (when using standardized VerbalIQ) average ADOS value
+  #definitely normal
+  #mean - ADOS is 0-21 scale - we have only ASD children so it should be above 50% of the scale (more than 10) - but there are also mild autists so only slightly higher than 10, could be 14
+  #sd - begin with 3 - then 95% of children would be between 8 and 20 - sounds good
+prior_a = rnorm(2e5,mean=14, sd=3)
+
+ggplot(as.data.frame(prior_a),aes(x=prior_a))+
+  geom_line(stat="density")+
+  theme_economist_white(gray_bg = F, base_family = "Verdana",base_size = 8)
+
+#maybe to broad, reduce sd
+prior_a = rnorm(2e5,mean=14, sd=2)
+
+ggplot(as.data.frame(prior_a),aes(x=prior_a))+
+  geom_line(stat="density")+
+  theme_economist_white(gray_bg = F, base_family = "Verdana",base_size = 8)
+
+#beta
+prior_ß = rnorm(2e5,-0.1,0.5)
+
+ggplot(as.data.frame(prior_ß),aes(x=prior_ß))+
+  geom_line(stat="density")+
+  theme_economist_white(gray_bg = F, base_family = "Verdana",base_size = 8)
+
+#sigma
+prior_sigma = runif(5e5,min=0,max=5)
+
+ggplot(as.data.frame(prior_sigma),aes(x=prior_sigma))+
+  geom_line(stat="density")+
+  theme_economist_white(gray_bg = F, base_family = "Verdana",base_size = 8)
+```
+
+```{r model that}
+#standardize VerbalIQ
+visit_1$VerbalIQ.s = (visit_1$VerbalIQ-mean(visit_1$VerbalIQ))/sd(visit_1$VerbalIQ)
+
+#check distribution of ADOS
+dens(visit_1$ADOS)
+
+flist=alist(
+        ADOS ~ dnorm( mu , sigma) ,
+        mu <- a + ß*VerbalIQ.s ,
+        a ~ dnorm(15, 2) ,
+        ß ~ dnorm(-0.1,0.5) ,
+        sigma ~ dunif(0,5)
+    )
+
+start = list (
+  a=mean(visit_1$ADOS),
+  ß=-0.1,
+  sigma=sd(visit_1$ADOS)
+)
+
+#NB Consider estimating log sigma instead
+verbal_m <- map(flist=flist,start=start,data=visit_1)
+
+precis(verbal_m,corr = T)
+
+precis_plot(precis(verbal_m))
+```
+
+Visualize results
+```{r}
+verbal_seq = seq(from=range(visit_1$VerbalIQ.s)[1]-3,to=range(visit_1$VerbalIQ.s)[2]+3,length.out = 1000)
+
+mu = link(verbal_m,n=1e4,data = data.frame(VerbalIQ.s=verbal_seq))
+mu.mean = apply( mu , 2 , mean )
+mu.PI = apply( mu , 2 , PI , prob=0.89 )
+sim_ADOS = sim(verbal_m,n=1e4,data = data.frame(VerbalIQ.s=verbal_seq))
+ADOS_PI = apply( sim_ADOS , 2 , PI , prob=0.89 )
+
+
+#ggplot 
+mu.PI = as.data.frame(t(mu.PI))
+ADOS_PI = as.data.frame(t(ADOS_PI))
+
+ggplot(visit_1)+
+  geom_ribbon(data=ADOS_PI,aes(ymin=`5%`,ymax=`94%`,x=verbal_seq),fill="#E6E6FA",alpha=0.8)+
+  geom_ribbon(data=mu.PI,aes(ymin=`5%`,ymax=`94%`,x=verbal_seq),fill='#B0C4DE',alpha=0.6)+
+  geom_point(aes(x=VerbalIQ.s,y=ADOS),colour="#6495ED")+
+  geom_line(data=data.frame(x=verbal_seq,y=mu.mean),aes(x=x,y=y),colour="#000080")+
+  coord_cartesian(xlim= c(min(visit_1$VerbalIQ.s),max(visit_1$VerbalIQ.s)))+
+  labs(title="Linear regression of ADOS predicted from verbal IQ", subtitle= "ADOS ~ α+ß*verbal IQ", x= "Verbal IQ", y= "ADOS")+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle =  element_text(hjust = 0.5) )+
+  theme_few(base_family = "Verdana")
+```
+
+```{r turn the above into function}
+plot_results = function (data,predictor,model,title,subtitle) {
+  #creates a list with the parameters - allows me to use name of variable as parameter for the function
+  pars = as.list(match.call()[-1])
+  
+  verbal_seq = seq(from=range(data[,as.character(pars$predictor)])[1]-2,to=range(data[,as.character(pars$predictor)])[2]+2,length.out = 1000)
+  
+  
+  mu = link(verbal_m,n=1e4,data = data.frame(VerbalIQ.s=verbal_seq))
+  mu.mean = apply( mu , 2 , mean )
+  mu.PI = as.data.frame(t(apply( mu , 2 , PI , prob=0.89 )))
+  sim_ADOS = sim(verbal_m,n=1e4,data = data.frame(VerbalIQ.s=verbal_seq))
+  ADOS_PI = as.data.frame(t(apply( sim_ADOS , 2 , PI , prob=0.89 )))
+
+  
+  plot=ggplot(data)+
+    geom_ribbon(data=ADOS_PI,aes(ymin=`5%`,ymax=`94%`,x=verbal_seq),fill="#E6E6FA",alpha=0.8)+
+    geom_ribbon(data=mu.PI,aes(ymin=`5%`,ymax=`94%`,x=verbal_seq),fill='#B0C4DE',alpha=0.6)+
+    geom_point(aes(x=data[,as.character(pars$predictor)],y=ADOS),colour="#6495ED")+
+    geom_line(data=data.frame(x=verbal_seq,y=mu.mean),aes(x=x,y=y),colour="#000080")+
+    coord_cartesian(xlim= c(min(data[,as.character(pars$predictor)]),max(data[,as.character(pars$predictor)])))+
+    labs(title=title, subtitle= subtitle, x=as.character(pars$predictor) , y= "ADOS")+
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle =  element_text(hjust = 0.5) )+
+    theme_few(base_family = "Verdana")
+  
+  print(plot)
+  
+  #and save the plot in the drive in jpeg as well
+  ggsave(paste0("Plots/",as.character(pars$predictor),"_results.jpg"),plot)
+}
+
+plot_results(data=visit_1,predictor=VerbalIQ.s,model=verbal_m,title ="Linear regression of ADOS predicted from verbal IQ",subtitle = "ADOS ~ α+ß*verbal IQ")
 ```
 
 
-The questions you will have to answer are:
+```{r}
+samples=extract.samples(verbal_m,n=1e4)
 
-1. Assess the relation between symptom severity and IQ (focus on visit 1 and children with ASD) and report the model, a plot of the model, a couple of lines describing the quality of the model and interpreting the results. P.S. Should you scale? P.P.S. Don't forget to motivate your priors. P.P.P.S. At least one plot for results and a plot for quality of each model (here and in the next questions) would be appreciated.
-1.1. Verbal IQ and ADOS
+dens(samples$a)
+dens(samples$ß)
+dens(samples$sigma)
+
+post_plot_verbal=scatter3D(x=samples$a, y=samples$ß, z=samples$sigma, bty = "g", colkey = FALSE ,main="Posterior of parameters",xlab="α",ylab="ß",zlab="sigma",phi=0,pch=20,cex=1.5)
+plot3Drgl::plotrgl()
+```
+
+
 1.2. Non Verbal IQ and ADOS
+```{r model that}
+
+```
+
 1.3. Social IQ and ADOS
+```{r model that}
+
+```
+
 
 2. Do the different aspects of IQ account for different portions of the variance in ADOS? 
 2.1. Does it make sense to have all IQ measures in the same model? First write a few lines answering the question and motivating your answer, including a discussion as to what happens when you put all of them in the same model. Then build a model following your answer. If your answer is "no", you are not free, you still have to answer: are there alternative ways of answering the question?
