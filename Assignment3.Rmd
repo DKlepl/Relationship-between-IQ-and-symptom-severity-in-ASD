@@ -45,6 +45,29 @@ str(visit_1)
 visit_1 = as.data.frame(visit_1)
 ```
 
+```{r explore data}
+#all data at visit 1
+  #Gender
+sum(d$Gender[d$Visit==1]==1) #61 males
+sum(d$Gender[d$Visit==1]==2) #11 girls
+  #Age
+mean(d$AgeMonths[d$Visit==1],na.rm=T) #26.26
+sd(d$AgeMonths[d$Visit==1],na.rm=T) #7.34
+
+  #Diagnosis
+sum(d$ASD[d$Visit==1]==1) #34 ASD
+sum(d$ASD[d$Visit==1]==0) #38 TD
+
+#for question 1
+#Age in months
+mean(visit_1$AgeMonths) #32.77
+sd(visit_1$AgeMonths) #5.27
+
+#Gender
+sum(visit_1$Gender==1) #29
+sum(visit_1$Gender==2) #5
+```
+
 1.1. Verbal IQ and ADOS
 
 First we need a motivated prior for the model. So let's start with that.
@@ -60,14 +83,14 @@ ggplot(as.data.frame(prior_a),aes(x=prior_a))+
   theme_economist_white(gray_bg = F, base_family = "Verdana",base_size = 8)
 
 #maybe to broad, reduce sd
-prior_a = rnorm(2e5,mean=14, sd=2)
+prior_a = rnorm(2e5,mean=14, sd=1)
 
 ggplot(as.data.frame(prior_a),aes(x=prior_a))+
   geom_line(stat="density")+
   theme_economist_white(gray_bg = F, base_family = "Verdana",base_size = 8)
 
 #beta
-prior_ß = rnorm(2e5,-0.1,0.5)
+prior_ß = rnorm(2e5,0,0.5)
 
 ggplot(as.data.frame(prior_ß),aes(x=prior_ß))+
   geom_line(stat="density")+
@@ -91,71 +114,52 @@ dens(visit_1$ADOS)
 flist=alist(
         ADOS ~ dnorm( mu , sigma) ,
         mu <- a + ß*VerbalIQ.s ,
-        a ~ dnorm(15, 2) ,
-        ß ~ dnorm(-0.1,0.5) ,
+        a ~ dnorm(14, 1) ,
+        ß ~ dnorm(0,0.5) ,
         sigma ~ dunif(0,5)
     )
 
 start = list (
   a=mean(visit_1$ADOS),
-  ß=-0.1,
+  ß=0,
   sigma=sd(visit_1$ADOS)
 )
 
 #NB Consider estimating log sigma instead
 verbal_m <- map(flist=flist,start=start,data=visit_1)
 
-precis(verbal_m,corr = T)
+precis1=precis(verbal_m,corr = T)
+precis1
+verbal_result=round(precis1@output,3)
+write.csv(verbal_result,"Results/VerbalIQ_results.csv")
 
 precis_plot(precis(verbal_m))
 ```
 
-Visualize results
-```{r}
-verbal_seq = seq(from=range(visit_1$VerbalIQ.s)[1]-3,to=range(visit_1$VerbalIQ.s)[2]+3,length.out = 1000)
-
-mu = link(verbal_m,n=1e4,data = data.frame(VerbalIQ.s=verbal_seq))
-mu.mean = apply( mu , 2 , mean )
-mu.PI = apply( mu , 2 , PI , prob=0.89 )
-sim_ADOS = sim(verbal_m,n=1e4,data = data.frame(VerbalIQ.s=verbal_seq))
-ADOS_PI = apply( sim_ADOS , 2 , PI , prob=0.89 )
-
-
-#ggplot 
-mu.PI = as.data.frame(t(mu.PI))
-ADOS_PI = as.data.frame(t(ADOS_PI))
-
-ggplot(visit_1)+
-  geom_ribbon(data=ADOS_PI,aes(ymin=`5%`,ymax=`94%`,x=verbal_seq),fill="#E6E6FA",alpha=0.8)+
-  geom_ribbon(data=mu.PI,aes(ymin=`5%`,ymax=`94%`,x=verbal_seq),fill='#B0C4DE',alpha=0.6)+
-  geom_point(aes(x=VerbalIQ.s,y=ADOS),colour="#6495ED")+
-  geom_line(data=data.frame(x=verbal_seq,y=mu.mean),aes(x=x,y=y),colour="#000080")+
-  coord_cartesian(xlim= c(min(visit_1$VerbalIQ.s),max(visit_1$VerbalIQ.s)))+
-  labs(title="Linear regression of ADOS predicted from verbal IQ", subtitle= "ADOS ~ α+ß*verbal IQ", x= "Verbal IQ", y= "ADOS")+
-  theme(plot.title = element_text(hjust = 0.5), plot.subtitle =  element_text(hjust = 0.5) )+
-  theme_few(base_family = "Verdana")
-```
-
-```{r turn the above into function}
+## Visualize results
+To make the process faster we'll define a function for drawing samples, computing PI intervals for predicted mean and predicted outcome and plot these over the original data.
+```{r function}
 plot_results = function (data,predictor,model,title,subtitle) {
   #creates a list with the parameters - allows me to use name of variable as parameter for the function
   pars = as.list(match.call()[-1])
   
-  verbal_seq = seq(from=range(data[,as.character(pars$predictor)])[1]-2,to=range(data[,as.character(pars$predictor)])[2]+2,length.out = 1000)
+  seq = seq(from=range(data[,as.character(pars$predictor)])[1]-2,to=range(data[,as.character(pars$predictor)])[2]+2,length.out = 1000)
   
-  
-  mu = link(verbal_m,n=1e4,data = data.frame(VerbalIQ.s=verbal_seq))
+  pred_d = data.frame(pred=seq)
+  names(pred_d)[names(pred_d)=="pred"] <- as.character(pars$predictor)
+
+  mu = link(model,n=1e4,data = pred_d)
   mu.mean = apply( mu , 2 , mean )
   mu.PI = as.data.frame(t(apply( mu , 2 , PI , prob=0.89 )))
-  sim_ADOS = sim(verbal_m,n=1e4,data = data.frame(VerbalIQ.s=verbal_seq))
+  sim_ADOS = sim(model,n=1e4,data =pred_d)
   ADOS_PI = as.data.frame(t(apply( sim_ADOS , 2 , PI , prob=0.89 )))
 
   
   plot=ggplot(data)+
-    geom_ribbon(data=ADOS_PI,aes(ymin=`5%`,ymax=`94%`,x=verbal_seq),fill="#E6E6FA",alpha=0.8)+
-    geom_ribbon(data=mu.PI,aes(ymin=`5%`,ymax=`94%`,x=verbal_seq),fill='#B0C4DE',alpha=0.6)+
+    geom_ribbon(data=ADOS_PI,aes(ymin=`5%`,ymax=`94%`,x=seq),fill="#E6E6FA",alpha=0.8)+
+    geom_ribbon(data=mu.PI,aes(ymin=`5%`,ymax=`94%`,x=seq),fill='#B0C4DE',alpha=0.6)+
     geom_point(aes(x=data[,as.character(pars$predictor)],y=ADOS),colour="#6495ED")+
-    geom_line(data=data.frame(x=verbal_seq,y=mu.mean),aes(x=x,y=y),colour="#000080")+
+    geom_line(data=data.frame(x=seq,y=mu.mean),aes(x=x,y=y),colour="#000080")+
     coord_cartesian(xlim= c(min(data[,as.character(pars$predictor)]),max(data[,as.character(pars$predictor)])))+
     labs(title=title, subtitle= subtitle, x=as.character(pars$predictor) , y= "ADOS")+
     theme(plot.title = element_text(hjust = 0.5), plot.subtitle =  element_text(hjust = 0.5) )+
@@ -164,9 +168,12 @@ plot_results = function (data,predictor,model,title,subtitle) {
   print(plot)
   
   #and save the plot in the drive in jpeg as well
-  ggsave(paste0("Plots/",as.character(pars$predictor),"_results.jpg"),plot)
+  ggsave(paste0("Figures/",as.character(pars$predictor),"_results.jpg"),plot)
 }
+```
 
+Now that the function is ready to use, let's plot the results of the verbalIQ model.
+```{r}
 plot_results(data=visit_1,predictor=VerbalIQ.s,model=verbal_m,title ="Linear regression of ADOS predicted from verbal IQ",subtitle = "ADOS ~ α+ß*verbal IQ")
 ```
 
@@ -174,23 +181,120 @@ plot_results(data=visit_1,predictor=VerbalIQ.s,model=verbal_m,title ="Linear reg
 ```{r}
 samples=extract.samples(verbal_m,n=1e4)
 
-dens(samples$a)
-dens(samples$ß)
-dens(samples$sigma)
-
-post_plot_verbal=scatter3D(x=samples$a, y=samples$ß, z=samples$sigma, bty = "g", colkey = FALSE ,main="Posterior of parameters",xlab="α",ylab="ß",zlab="sigma",phi=0,pch=20,cex=1.5)
-plot3Drgl::plotrgl()
+post_plot_verbal=scatter3D(x=samples$a, y=samples$ß, z=samples$sigma, colkey = FALSE ,main="Posterior of parameters",xlab="α",ylab="ß",zlab="σ",phi = 0, bty = "b2",pch = 20, cex = 2)
 ```
 
 
 1.2. Non Verbal IQ and ADOS
-```{r model that}
+Adjust the priors
+```{r}
+# alpha can be the same - Normal(14, 1)
+# beta needs to be readjusted
+range(visit_1$NonVerbalIQ.s)
 
+prior_ß2 = rnorm(2e5,0,0.6)
+
+ggplot(as.data.frame(prior_ß2),aes(x=prior_ß2))+
+  geom_line(stat="density")+
+  theme_economist_white(gray_bg = F, base_family = "Verdana",base_size = 8)
+```
+
+```{r model that}
+#standardize NonVerbalIQ
+visit_1$NonVerbalIQ.s = (visit_1$NonVerbalIQ-mean(visit_1$NonVerbalIQ))/sd(visit_1$NonVerbalIQ)
+
+
+flist=alist(
+        ADOS ~ dnorm( mu , sigma) ,
+        mu <- a + ß*NonVerbalIQ.s ,
+        a ~ dnorm(14, 1) ,
+        ß ~ dnorm(0,0.6) ,
+        sigma ~ dunif(0,5)
+    )
+
+start = list (
+  a=mean(visit_1$ADOS),
+  ß=0,
+  sigma=sd(visit_1$ADOS)
+)
+
+#NB Consider estimating log sigma instead
+nonverbal_m <- map(flist=flist,start=start,data=visit_1)
+
+precis2=precis(nonverbal_m,corr = T)
+precis2
+nonverbal_result=round(precis2@output,3)
+write.csv(nonverbal_result,"Results/NonVerbalIQ_results.csv")
+
+precis_plot(precis(nonverbal_m))
+```
+
+Visualization
+```{r}
+plot_results(data=visit_1,predictor=NonVerbalIQ.s,model=nonverbal_m,title ="Linear regression of ADOS predicted from non-verbal IQ",subtitle = "ADOS ~ α+ß*NonVerbal IQ")
+```
+
+
+```{r}
+samples=extract.samples(nonverbal_m,n=1e4)
+
+post_plot_verbal=scatter3D(x=samples$a, y=samples$ß, z=samples$sigma, colkey = FALSE ,main="Posterior of parameters",xlab="α",ylab="ß",zlab="σ",phi = 0, bty = "b2",pch = 20, cex = 2)
 ```
 
 1.3. Social IQ and ADOS
-```{r model that}
+Adjust the priors
+```{r}
+# alpha can be the same - Normal(14, 1)
+# beta needs to be readjusted
+range(visit_1$SocialIQ.s)
 
+prior_ß3 = rnorm(2e5,0,0.5)
+
+ggplot(as.data.frame(prior_ß3),aes(x=prior_ß3))+
+  geom_line(stat="density")+
+  theme_economist_white(gray_bg = F, base_family = "Verdana",base_size = 8)
+```
+
+```{r model that}
+#standardize SocialIQ
+visit_1$SocialIQ.s = (visit_1$SocialIQ-mean(visit_1$SocialIQ))/sd(visit_1$SocialIQ)
+
+
+flist=alist(
+        ADOS ~ dnorm( mu , sigma) ,
+        mu <- a + ß*SocialIQ.s ,
+        a ~ dnorm(14, 1) ,
+        ß ~ dnorm(0,0.5) ,
+        sigma ~ dunif(0,5)
+    )
+
+start = list (
+  a=mean(visit_1$ADOS),
+  ß=0,
+  sigma=sd(visit_1$ADOS)
+)
+
+#NB Consider estimating log sigma instead
+social_m <- map(flist=flist,start=start,data=visit_1)
+
+precis3=precis(social_m,corr = T)
+precis3
+social_result=round(precis3@output,3)
+write.csv(social_result,"Results/SocialIQ_results.csv")
+
+precis_plot(precis(social_m))
+```
+
+Visualization
+```{r}
+plot_results(data=visit_1,predictor=SocialIQ.s,model=social_m,title ="Linear regression of ADOS predicted from social IQ",subtitle = "ADOS ~ α+ß*Social IQ")
+```
+
+
+```{r}
+samples=extract.samples(social_m,n=1e4)
+
+post_plot_verbal=scatter3D(x=samples$a, y=samples$ß, z=samples$sigma, colkey = FALSE ,main="Posterior of parameters",xlab="α",ylab="ß",zlab="σ",phi = 0, bty = "b2",pch = 20, cex = 2)
 ```
 
 
