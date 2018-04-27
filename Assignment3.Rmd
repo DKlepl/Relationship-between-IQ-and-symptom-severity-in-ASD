@@ -63,7 +63,17 @@ sd(visit_1$AgeMonths) #5.27
 #Gender
 sum(visit_1$Gender==1) #29
 sum(visit_1$Gender==2) #5
+
+#check distribution of ADOS
+dens(visit_1$ADOS)
 ```
+
+```{r scale variables}
+visit_1$VerbalIQ.s = (visit_1$VerbalIQ-mean(visit_1$VerbalIQ))/sd(visit_1$VerbalIQ)
+visit_1$NonVerbalIQ.s = (visit_1$NonVerbalIQ-mean(visit_1$NonVerbalIQ))/sd(visit_1$NonVerbalIQ)
+visit_1$SocialIQ.s = (visit_1$SocialIQ-mean(visit_1$SocialIQ))/sd(visit_1$SocialIQ)
+```
+
 
 1.1. Verbal IQ and ADOS
 
@@ -102,11 +112,6 @@ ggplot(as.data.frame(prior_sigma),aes(x=prior_sigma))+
 ```
 
 ```{r model that}
-#standardize VerbalIQ
-visit_1$VerbalIQ.s = (visit_1$VerbalIQ-mean(visit_1$VerbalIQ))/sd(visit_1$VerbalIQ)
-
-#check distribution of ADOS
-dens(visit_1$ADOS)
 
 flist=alist(
         ADOS ~ dnorm( mu , sigma) ,
@@ -219,11 +224,7 @@ ggplot(as.data.frame(prior_ß2),aes(x=prior_ß2))+
 ```
 
 ```{r model that}
-#standardize NonVerbalIQ
-visit_1$NonVerbalIQ.s = (visit_1$NonVerbalIQ-mean(visit_1$NonVerbalIQ))/sd(visit_1$NonVerbalIQ)
-
-
-flist=alist(
+flist=alist
         ADOS ~ dnorm( mu , sigma) ,
         mu <- a + ß*NonVerbalIQ.s ,
         a ~ dnorm(14, 1) ,
@@ -275,10 +276,6 @@ ggplot(as.data.frame(prior_ß3),aes(x=prior_ß3))+
 ```
 
 ```{r model that}
-#standardize SocialIQ
-visit_1$SocialIQ.s = (visit_1$SocialIQ-mean(visit_1$SocialIQ))/sd(visit_1$SocialIQ)
-
-
 flist=alist(
         ADOS ~ dnorm( mu , sigma) ,
         mu <- a + ß*SocialIQ.s ,
@@ -384,13 +381,18 @@ flist_all=alist(
         ßs ~ dnorm(0,1) ,
         ßv ~ dnorm(0,1),
         ßn ~ dnorm(0,1),
-        sigma ~ dnorm(4,2)
+        sigma ~ dnorm(3,1)
     )
 
 
 all_m = map(flist=flist_all,data=visit_1)
-precis(all_m,corr = T)
+precis_all=precis(all_m,corr = T)
+precis_all
 precis_plot(precis(all_m))
+
+#save the results
+all_result=round(precis_all@output,3)
+write.csv(all_result,"Results/AllIQ_results.csv")
 ```
 
 PPC plot
@@ -399,8 +401,12 @@ PP_all = sim(all_m,n=1e4)
 
 library(bayesplot)
 y=visit_1$ADOS
-pp_check(y, PP_all[1:300,],"dens_overlay")
+pp_check(y, PP_all[1:100,],"dens_overlay")+
+  labs(title="PPC of model with all IQs", x="ADOS" , y= "Density")+
+  theme_few(base_family = "Verdana")
 
+dev.copy(jpeg,'Figures/allIQ_PPC.jpg')
+dev.off()
 ```
 
 3. Let's now include also the TD children. Does it make sense to ask whether IQ and ADOS are related? Motivate your answer. In any case, if you wanted to build a model to answer that question, which model would you build? Run the model, assess its quality, write a few lines interpreting the results.
@@ -424,6 +430,33 @@ d2$SocialIQ.s = (d2$SocialIQ-mean(d2$SocialIQ))/sd(d2$SocialIQ)
 class(d2) #OK
 ```
 
+```{r argue}
+#the distribution of ADOS is now bimodal - one peak for TD and one for ASD children
+distr_ADOS=ggplot(d2,aes(ADOS))+
+  geom_line(stat="density")+
+  labs(title="Distribution of ADOS",x="",y="")+
+  theme_few(base_family = "Verdana")
+
+
+#plot the distributions separately
+d2_plot=d2
+d2_plot$ASD = as.factor(d2_plot$ASD)
+d2_plot$ASD = plyr::revalue(d2_plot$ASD,c("0"="TD","1"="ASD"))
+
+distributions_split=ggplot(d2_plot,aes(ADOS))+
+  geom_line(stat="density")+
+  labs(subtitle="Split by diagnosis",y="")+
+  facet_wrap(~ASD,scales = "free_y")+
+  theme_few(base_family = "Verdana")
+
+distributions_both=grid.arrange(distr_ADOS,distributions_split)
+
+ggsave("Figures/ADOS_distribution.jpg",distributions_both)
+
+mean(d2$ADOS)
+sd(d2$ADOS)
+```
+
 ```{r model}
 flist_1=alist(
         ADOS ~ dnorm( mu , sigma) ,
@@ -432,27 +465,57 @@ flist_1=alist(
         ßs ~ dnorm(0,0.5) ,
         ßv ~ dnorm(0,0.5),
         ßn ~ dnorm(0,0.5),
-        ßA ~ dnorm(0,3),
-        sigma ~ dnorm(4,1)
+        ßA ~ dnorm(0,2),
+        sigma ~ dnorm(5,1)
     )
 
+start = list (
+  a=mean(d2$ADOS),
+  ßs=0,
+  ßv=0,
+  ßn=0,
+  ßA=0,
+  sigma=sd(d2$ADOS)
+)
 
-m1 = map(flist=flist_1,data=d2)
-precis(m1,corr = T)
+m1 = map(flist=flist_1,start = start,data=d2)
+precis_TDtoo=precis(m1,corr = T)
 precis_plot(precis(m1))
+
+TDtoo_result=round(precis_TDtoo@output,3)
+write.csv(TDtoo_result,"Results/TDtoo_results.csv")
 ```
 
-```{r}
+```{r PPC plot}
 PP_1 = sim(m1,n=1e4)
 
 library(bayesplot)
 y=d2$ADOS
-pp_check(y, PP_1[1:100,],"dens_overlay")
+pp_check(y, PP_1[1:200,],"dens_overlay")+
+labs(title="PPC of model including TD children", x="ADOS" , y= "Density")+
+  theme_few(base_family = "Verdana")
 
+dev.copy(jpeg,'Figures/TDtoo_PPC.jpg')
+dev.off()
 ```
 
 4. Let's discuss contents:
 4.1. You have three scores for IQ, do they show shared variance? Is that the same in TD and ASD? What does that tell us about IQ?
+
+```{r correlations}
+TDs = subset(d2,ASD==0)
+
+cor(TDs$VerbalIQ.s,TDs$NonVerbalIQ.s)
+cor(TDs$VerbalIQ.s,TDs$SocialIQ.s)
+cor(TDs$SocialIQ.s,TDs$NonVerbalIQ.s)
+```
+
+```{r correlations baysian}
+
+```
+
+
+
 4.2. You have explored the relation between IQ and ADOS. How do you explain that relation from a cognitive perspective? N.B. You can present alternative hypotheses.
 
 5. Bonus questions: Including measurement errors. 
