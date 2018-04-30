@@ -6,15 +6,11 @@ output: html_document
 ---
 
 ```{r libraries}
-library(dplyr)
-library(rethinking)
-library(ggplot2)
-library(plot3D)
-library(ggthemes)
+pacman::p_load(dplyr,rethinking,ggplot2,plot3D,bayesplot,ggthemes)
 ```
 
 ```{r load and data}
-d = read.csv("Assignment3Data.csv")
+d = read.csv("data.csv")
 ```
 
 ## Multivariate linear models
@@ -504,14 +500,27 @@ dev.off()
 
 ```{r correlations}
 TDs = subset(d2,ASD==0)
+ASDs = subset(d2,ASD==1)
 
-cor(TDs$VerbalIQ.s,TDs$NonVerbalIQ.s)
-cor(TDs$VerbalIQ.s,TDs$SocialIQ.s)
-cor(TDs$SocialIQ.s,TDs$NonVerbalIQ.s)
-```
+#results are basically the same as with using bayesian methods
+shared_variance = data.frame(
+  Diagnosis = c("TD", "ASD"),
+  Verbal_NonVerbal = c(
+  cor(TDs$VerbalIQ.s, TDs$NonVerbalIQ.s),
+  cor(ASDs$VerbalIQ.s, ASDs$NonVerbalIQ.s)
+  ),
+  Verbal_Social = c(
+  cor(TDs$VerbalIQ.s, TDs$SocialIQ.s),
+  cor(ASDs$VerbalIQ.s, ASDs$SocialIQ.s)
+  ),
+  Social_NonVerbal = c(
+  cor(TDs$SocialIQ.s, TDs$NonVerbalIQ.s),
+  cor(ASDs$SocialIQ.s, ASDs$NonVerbalIQ.s)
+  )
+)
 
-```{r correlations baysian}
-
+shared_variance[2:4]=round(shared_variance[2:4],3)
+write.csv(shared_variance,"Results/IQ_correlation.csv",row.names = F)
 ```
 
 
