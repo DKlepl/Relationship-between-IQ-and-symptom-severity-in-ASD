@@ -220,7 +220,7 @@ ggplot(as.data.frame(prior_ß2),aes(x=prior_ß2))+
 ```
 
 ```{r model that}
-flist=alist
+flist=alist(
         ADOS ~ dnorm( mu , sigma) ,
         mu <- a + ß*NonVerbalIQ.s ,
         a ~ dnorm(14, 1) ,
@@ -391,7 +391,7 @@ all_result=round(precis_all@output,3)
 write.csv(all_result,"Results/AllIQ_results.csv")
 ```
 
-PPC plot
+Quality check
 ```{r}
 PP_all = sim(all_m,n=1e4)
 
@@ -404,6 +404,29 @@ pp_check(y, PP_all[1:100,],"dens_overlay")+
 dev.copy(jpeg,'Figures/allIQ_PPC.jpg')
 dev.off()
 ```
+
+Comparing single IQ models with the full one
+
+Build also a "baseline" model
+```{r}
+m_null = map(
+  alist(
+        ADOS ~ dnorm( mu , sigma) ,
+        mu <- a,
+        a ~ dnorm(14, 1),
+        sigma ~ dcauchy(3,1)
+    ),
+  data=visit_1
+)
+precis(m_null)
+```
+
+Using information criteria
+```{r}
+compare(m_null,all_m,verbal_m,nonverbal_m,social_m)
+#model with all IQs gets all the weight
+```
+
 
 3. Let's now include also the TD children. Does it make sense to ask whether IQ and ADOS are related? Motivate your answer. In any case, if you wanted to build a model to answer that question, which model would you build? Run the model, assess its quality, write a few lines interpreting the results.
 
@@ -454,7 +477,8 @@ sd(d2$ADOS)
 ```
 
 ```{r model}
-flist_1=alist(
+m1=map(
+  alist(
         ADOS ~ dnorm( mu , sigma) ,
         mu <- a + ßs*SocialIQ.s + ßv*VerbalIQ.s + ßn*NonVerbalIQ.s +ßA*ASD,
         a ~ dnorm(5, 2) ,
@@ -462,19 +486,11 @@ flist_1=alist(
         ßv ~ dnorm(0,0.5),
         ßn ~ dnorm(0,0.5),
         ßA ~ dnorm(0,2),
-        sigma ~ dnorm(5,1)
-    )
-
-start = list (
-  a=mean(d2$ADOS),
-  ßs=0,
-  ßv=0,
-  ßn=0,
-  ßA=0,
-  sigma=sd(d2$ADOS)
+        sigma ~ dcauchy(4,1)
+    ),
+  data = d2
 )
 
-m1 = map(flist=flist_1,start = start,data=d2)
 precis_TDtoo=precis(m1,corr = T)
 precis_plot(precis(m1))
 
@@ -494,6 +510,73 @@ labs(title="PPC of model including TD children", x="ADOS" , y= "Density")+
 dev.copy(jpeg,'Figures/TDtoo_PPC.jpg')
 dev.off()
 ```
+
+Model comparison
+
+First build other models (intercept, single predictors)
+```{r}
+m_intercept = map(
+  alist(
+        ADOS ~ dnorm( mu , sigma) ,
+        mu ~ dnorm(5, 2),
+        sigma ~ dcauchy(4,1)
+    ),
+  data = d2
+)
+
+m_asd = map(
+  alist(
+        ADOS ~ dnorm( mu , sigma) ,
+        mu <- a + ßA*ASD,
+        a ~ dnorm(5, 2) ,
+        ßA ~ dnorm(0,2),
+        sigma ~ dcauchy(4,1)
+    ),
+  data = d2
+)
+
+m_verb = map(
+  alist(
+        ADOS ~ dnorm( mu , sigma) ,
+        mu <- a + ßv*VerbalIQ.s + ßA*ASD,
+        a ~ dnorm(5, 2) ,
+        ßv ~ dnorm(0,0.5),
+        ßA ~ dnorm(0,2),
+        sigma ~ dcauchy(4,1)
+    ),
+  data = d2
+)
+
+m_nonverb = map(
+  alist(
+        ADOS ~ dnorm( mu , sigma) ,
+        mu <- a + ßn*NonVerbalIQ.s + ßA*ASD,
+        a ~ dnorm(5, 2) ,
+        ßn ~ dnorm(0,0.5),
+        ßA ~ dnorm(0,2),
+        sigma ~ dcauchy(4,1)
+    ),
+  data = d2
+)
+
+m_soc = map(
+  alist(
+        ADOS ~ dnorm( mu , sigma) ,
+        mu <- a + ßs*SocialIQ.s + ßA*ASD,
+        a ~ dnorm(5, 2) ,
+        ßs ~ dnorm(0,0.5),
+        ßA ~ dnorm(0,2),
+        sigma ~ dcauchy(4,1)
+    ),
+  data = d2
+)
+```
+
+Now compare the models with WAIC
+```{r}
+compare(m1,m_intercept,m_asd,m_verb,m_nonverb,m_soc)
+```
+
 
 4. Let's discuss contents:
 4.1. You have three scores for IQ, do they show shared variance? Is that the same in TD and ASD? What does that tell us about IQ?
